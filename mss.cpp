@@ -18,48 +18,45 @@ using namespace std;
 
 int main(int argc, char* argv[]) {
     
-    int processorCount; // pocet procesorov
-    int myProcessId; // id nasho procesu
-    MPI_Status stat;            //struct- obsahuje kod- source, tag, error
+    int processorCount;
+    int myProcessId;
+    MPI_Status stat; 
 
-    //MPI INIT
-    MPI_Init(&argc, &argv); // inicializacia MPI 
-    MPI_Comm_size(MPI_COMM_WORLD, &processorCount); // zistime, kolko procesov bezi 
-    MPI_Comm_rank(MPI_COMM_WORLD, &myProcessId); // zistime id nasho procesu 
+    MPI_Init(&argc, &argv);
+    MPI_Comm_size(MPI_COMM_WORLD, &processorCount); 
+    MPI_Comm_rank(MPI_COMM_WORLD, &myProcessId);
 
     int numbersArg = stoi(argv[1], nullptr, 10);
 
+    // vypocet kolko cisiel sa vojde do kazdeho procesoru
     const int arraySize = ((numbersArg % processorCount) == 0)
         ? (numbersArg / processorCount)
         : ((numbersArg / processorCount) + 1);
 
-    int mynumbers[arraySize];              //moje hodnota
-    int neighnumbers[arraySize];            //hodnota souseda
+    int myNumbers[arraySize];
+    int numbersFromNextProc[arraySize];
     for (int i = 0; i < arraySize; i++) {
-        mynumbers[i] = INT_MAX;
+        myNumbers[i] = INT_MAX;
     }
     for (int i = 0; i < arraySize; i++) {
-        neighnumbers[i] = INT_MAX;
+        numbersFromNextProc[i] = INT_MAX;
     }
 
-    // cout << "Proc: " << myProcessId << " -> " << arraySize << ", processor count: " << processorCount << endl;
-
-    //NACITANIE SOUBORU
     if (myProcessId == 0) {
-        char input[]= "numbers"; // meno suboru so vstupnymi hodnotami    
+        char input[]= "numbers";
         
-        int numbers[arraySize]; // hodnota pri nacitani suboru
+        int numbers[arraySize]; 
         for (int i = 0; i < arraySize; i++) {
             numbers[i] = INT_MAX;
         }
         int invar = 0; // invariant - urcuje cislo proc, ktoremu se bude posielat
-        fstream fin; // stream pre nacitanie zo suboru
+        fstream fin; 
         fin.open(input, ios::in);  
 
         while (fin.good()) {
             for (int i = 0; i < arraySize; i++) {
               numbers[i] = fin.get();
-              if (!fin.good()) {
+              if (!fin.good()) { // ak nacitame EOF tak koniec
                 numbers[i] = INT_MAX;
                 break;
               }
@@ -67,19 +64,13 @@ int main(int argc, char* argv[]) {
             int it = 0;
             while (it < arraySize) {
                 if (numbers[it] != INT_MAX) {
-                    // cout << "Init values:";
-                    // for (int i = 0; i < arraySize; i++) {
-                        // cout << " " << numbers[i];
-                    // }
-                    // cout << endl;
-                    MPI_Send(&numbers, arraySize, MPI_INT, invar, TAG, MPI_COMM_WORLD); //buffer,velikost,typ,rank prijemce,tag,komunikacni skupina
+                    MPI_Send(&numbers, arraySize, MPI_INT, invar, TAG, MPI_COMM_WORLD); // poslanie hodnot do procesoru s danym cislom invar
                     invar++;
                     break;
                 }
                 it++;
             }
-
-// TODO toto je finalny vypis
+        
             for (int x = 0; x < (arraySize - 1); x++) {
                 if (numbers[x] != INT_MAX) {
                     cout << numbers[x] << " ";
@@ -96,49 +87,40 @@ int main(int argc, char* argv[]) {
             }
         }
         cout << endl;
+        // este jedno poslanie, v specialnych pripadoch ak by sa nenaplnili vsetky procesory
         while (invar < processorCount) {
-            MPI_Send(&numbers, arraySize, MPI_INT, invar, TAG, MPI_COMM_WORLD); //buffer,velikost,typ,rank prijemce,tag,komunikacni skupina
+            MPI_Send(&numbers, arraySize, MPI_INT, invar, TAG, MPI_COMM_WORLD);
             invar++;
         }
 
         fin.close();                                
     }
 
-    //PRIJETI HODNOTY CISLA
-    //vsechny procesory(vcetne mastera) prijmou hodnotu a zahlasi ji
-    MPI_Recv(&mynumbers, arraySize, MPI_INT, 0, TAG, MPI_COMM_WORLD, &stat); //buffer,velikost,typ,rank odesilatele,tag, skupina, stat
+    // vsetky procesory prijmu hodnotu z procesoru 0
+    MPI_Recv(&myNumbers, arraySize, MPI_INT, 0, TAG, MPI_COMM_WORLD, &stat);
  
-    sort(mynumbers, mynumbers + arraySize);
+    // zoradenie hodnot 
+    sort(myNumbers, myNumbers + arraySize);
  
-    //LIMIT PRO INDEXY
-    int halfcycles = ((processorCount % 2) == 0) ? (processorCount/2) : ((processorCount/2) + 1);
-    // int halfcycles = ((processorCount/2) + 1);
-    int oddlimit = 2*halfcycles-1;                 //limity pro sude
-    // int oddlimit = 2*halfcycles-1;                 //limity pro sude
-    int evenlimit = 2*(processorCount/2);              //liche
-    // int evenlimit = 2*halfcycles;              //liche
-    int cycles=0;                                   //pocet cyklu pro pocitani slozitosti
+    // pocet iteracii
+    int iterations = ((processorCount % 2) == 0) ? (processorCount/2) : ((processorCount/2) + 1);
+    int limit = processorCount-1;
 
-    // cout << "ODD LIMIT: " << oddlimit << ", EVENLIMIT: " << evenlimit << endl;
-    //RAZENI------------chtelo by to umet pocitat cykly nebo neco na testy------
-    //cyklus pro linearitu
-    for(int j=1; j<=halfcycles; j++){
-        cycles++;           //pocitame cykly, abysme mohli udelat krasnej graf:)
+    for (int j = 1; j <= iterations; j++) { 
 
-        //sude proc 
-        if((!(myProcessId % 2) || myProcessId == 0) && (myProcessId < evenlimit)) {
-            MPI_Send(&mynumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD);          //poslu sousedovi svoje cislo
-            MPI_Recv(&mynumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD, &stat);   //a cekam na nizsi
-        }//if sude
-        else if((myProcessId % 2) && (myProcessId <= evenlimit)){//liche prijimaji zpravu a vraceji mensi hodnotu (to je ten swap)
-            MPI_Recv(&neighnumbers, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD, &stat); //jsem sudy a prijimam
+        if ((!(myProcessId % 2) || myProcessId == 0) && (myProcessId < limit)) {
+            MPI_Send(&myNumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD);        
+            MPI_Recv(&myNumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD, &stat); 
+        }
+        else if ((myProcessId % 2) && (myProcessId <= limit)) {
+            MPI_Recv(&numbersFromNextProc, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD, &stat);
 
             int sumNumbers[arraySize * 2];
             for (int i = 0; i < arraySize; i++) {
-                sumNumbers[i] = mynumbers[i];
+                sumNumbers[i] = myNumbers[i];
             }
             for (int i = arraySize; i < (arraySize * 2); i++) {
-                sumNumbers[i] = neighnumbers[i-arraySize];
+                sumNumbers[i] = numbersFromNextProc[i-arraySize];
             }
             sort(sumNumbers, sumNumbers + (arraySize * 2));
             int lowerPart[arraySize];
@@ -151,28 +133,25 @@ int main(int argc, char* argv[]) {
             }
 
             for (int i = 0; i < arraySize; i++) {
-                mynumbers[i] = higherPart[i];
+                myNumbers[i] = higherPart[i];
             }
 
-            MPI_Send(&lowerPart, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD);       //poslu svoje 
-        }//else if (liche)
-        else{//sem muze vlezt jen proc, co je na konci
-        }//else
+            MPI_Send(&lowerPart, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD); 
+        }
 
-        //liche proc 
-        if((myProcessId % 2) && (myProcessId < oddlimit)) {
-            MPI_Send(&mynumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD);           //poslu sousedovi svoje cislo
-            MPI_Recv(&mynumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD, &stat);    //a cekam na nizsi
-        }//if liche
-        else if(myProcessId <= oddlimit && myProcessId != 0 && !(myProcessId % 2)){//sude prijimaji zpravu a vraceji mensi hodnotu (to je ten swap)
-            MPI_Recv(&neighnumbers, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD, &stat); //jsem sudy a prijimam
+        if ((myProcessId % 2) && (myProcessId < limit)) {
+            MPI_Send(&myNumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD); 
+            MPI_Recv(&myNumbers, arraySize, MPI_INT, myProcessId+1, TAG, MPI_COMM_WORLD, &stat); 
+        }
+        else if (myProcessId <= limit && myProcessId != 0 && !(myProcessId % 2)) {
+            MPI_Recv(&numbersFromNextProc, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD, &stat);
 
             int sumNumbers[arraySize * 2];
             for (int i = 0; i < arraySize; i++) {
-                sumNumbers[i] = mynumbers[i];
+                sumNumbers[i] = myNumbers[i];
             }
             for (int i = arraySize; i < (arraySize * 2); i++) {
-                sumNumbers[i] = neighnumbers[i-arraySize];
+                sumNumbers[i] = numbersFromNextProc[i-arraySize];
             }
             sort(sumNumbers, sumNumbers + (arraySize * 2));
             int lowerPart[arraySize];
@@ -184,51 +163,40 @@ int main(int argc, char* argv[]) {
                 higherPart[i-arraySize] = sumNumbers[i];
             }
             for (int i = 0; i < arraySize; i++) {
-                mynumbers[i] = higherPart[i];
+                myNumbers[i] = higherPart[i];
             }
-            MPI_Send(&lowerPart, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD);       //poslu svoje
-        }//else if (sude)
-        else{//sem muze vlezt jen proc, co je na konci
-        }//else
+            MPI_Send(&lowerPart, arraySize, MPI_INT, myProcessId-1, TAG, MPI_COMM_WORLD);
+        }
         
-    }//for pro linearitu
-    //RAZENI--------------------------------------------------------------------
+    }
 
-
-    //FINALNI DISTRIBUCE VYSLEDKU K MASTEROVI-----------------------------------
-    int* final= new int [processorCount * arraySize];
+    int* result = new int [processorCount * arraySize];
     for (int i = 1; i < processorCount; i++) {
         if (myProcessId == i) {
-            // cout << "Proc: " << myProcessId << ":";
-            // for (int i = 0; i < arraySize; i++) {
-                // cout << " " << mynumbers[i];
-            // }
-            // cout << endl;
-            MPI_Send(&mynumbers, arraySize, MPI_INT, 0, TAG,  MPI_COMM_WORLD);
+            MPI_Send(&myNumbers, arraySize, MPI_INT, 0, TAG,  MPI_COMM_WORLD);
         }
         if (myProcessId == 0) {
-            MPI_Recv(&neighnumbers, arraySize, MPI_INT, i, TAG, MPI_COMM_WORLD, &stat); //jsem 0 a prijimam
+            MPI_Recv(&numbersFromNextProc, arraySize, MPI_INT, i, TAG, MPI_COMM_WORLD, &stat);
             for (int x = 0; x < arraySize; x++) {
-                final[(i*arraySize) + x] = neighnumbers[x];
+                result[(i*arraySize) + x] = numbersFromNextProc[x];
             }
-        }//if sem master
-    }//for
+        }
+    }
 
     if (myProcessId == 0) {
         for (int x = 0; x < arraySize; x++) {
-           final[x] = mynumbers[x];
+           result[x] = myNumbers[x];
         }
         for (int x = 0; x < ((arraySize * processorCount) - 1); x++) {
-            if (final[x] != INT_MAX) {
-                cout << final[x] << endl;                
+            if (result[x] != INT_MAX) {
+                cout << result[x] << endl;                
             }
         }
-        if (final[(arraySize * processorCount) - 1] != INT_MAX) {
-            cout << final[(arraySize * processorCount) - 1] << endl;
+        if (result[(arraySize * processorCount) - 1] != INT_MAX) {
+            cout << result[(arraySize * processorCount) - 1] << endl;
         }
-    }//if vypis
-    //VYSLEDKY------------------------------------------------------------------
-    
+    }
+
     MPI_Finalize(); 
     return 0;
 
