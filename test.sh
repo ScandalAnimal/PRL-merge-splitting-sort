@@ -1,25 +1,18 @@
 #!/bin/bash
 
-#pocet cisel bud zadam nebo 10 :)
-if [ $# -lt 1 ];then 
-	numbers=10;
-	processors=10;
-else
-	numbers=$1;
-	processors=$2;
-fi;
+if [ "$#" -ne 2 ]; then
+    echo "Illegal number of arguments!"
+    exit 1
+fi
 
-#preklad cpp zdrojaku
-mpic++ --prefix /usr/local/share/OpenMPI -o oets mss.cpp
+#vytvor soubor s cisly
+dd if=/dev/urandom bs=1 count=$1 of=numbers
 
-
-#vyrobeni souboru s random cisly
-dd if=/dev/random bs=1 count=$numbers of=numbers
+#preklad
+mpic++ --prefix /usr/local/share/OpenMPI -o mss mss.cpp
 
 #spusteni
-mpirun --prefix /usr/local/share/OpenMPI -np $processors oets $numbers $processors
+mpirun --prefix /usr/local/share/OpenMPI -np $2 mss $1
 
 #uklid
-rm -f oets numbers
-
-
+rm -f mss numbers
